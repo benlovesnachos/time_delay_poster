@@ -1,0 +1,363 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Parameters": {
+        "QueueNameParameter": {
+            "Type": "String"
+        },
+        "ApplicationNameParameter": {
+            "Type": "String"
+        }
+    },
+    "Outputs": {
+        "QueueName": {
+            "Description": "The name of the queue",
+            "Value": {
+                "Fn::GetAtt": [
+                    "SQSQueue",
+                    "QueueName"
+                ]
+            }
+        },
+        "QueueURL": {
+            "Description": "The URL of the queue",
+            "Value": {
+                "Ref": "SQSQueue"
+            }
+        },
+        "QueueARN": {
+            "Description": "The ARN of the queue",
+            "Value": {
+                "Fn::GetAtt": [
+                    "SQSQueue",
+                    "Arn"
+                ]
+            }
+        },
+        "ApiGatewayEndpoint": {
+            "Description": "The endpoint of the API Gateway",
+            "Value": {
+                "Fn::Sub": "https://${ApiPublisher}.execute-api.${AWS::Region}.amazonaws.com/prod/publish"
+            }
+        }
+    },
+    "Description": "A service to delay calling an endpoint after a given amount of seconds with an optional payload.",
+    "Resources": {
+        "sqsReceiver": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": {
+                        "Fn::Sub": "itnachos-code-${AWS::Region}"
+                    },
+                    "S3Key": "queue_to_endpoint_function.zip"
+                },
+                "Description": "Receives messages from an SQS queue.",
+                "Tags": [
+                    {
+                        "Value": "SAM",
+                        "Key": "lambda:createdBy"
+                    }
+                ],
+                "MemorySize": 128,
+                "Environment": {
+                    "Variables": {
+                        "QUEUE_URL": {
+                            "Ref": "SQSQueue"
+                        },
+                        "MAX_QUE_TIME": 900
+                    }
+                },
+                "Handler": "index.handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "sqsReceiverRole",
+                        "Arn"
+                    ]
+                },
+                "Timeout": 10,
+                "Runtime": "nodejs12.x"
+            }
+        },
+        "sqsReceiverRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+                ],
+                "Policies": [
+                    {
+                        "PolicyName": "sqsReceiverRolePolicy0",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "sqs:ChangeMessageVisibility",
+                                        "sqs:ChangeMessageVisibilityBatch",
+                                        "sqs:DeleteMessage",
+                                        "sqs:DeleteMessageBatch",
+                                        "sqs:GetQueueAttributes",
+                                        "sqs:ReceiveMessage",
+                                        "sqs:SendMessage",
+                                        "sqs:SendMessageBatch",
+                                        "sqs:SetQueueAttributes"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": [
+                                            "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${queueName}",
+                                            {
+                                                "queueName": {
+                                                    "Ref": "QueueNameParameter"
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "Effect": "Allow"
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sts:AssumeRole"
+                            ],
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "DependsOn": [
+                "SQSQueue"
+            ]
+        },
+        "EventSourceMapping": {
+            "Type": "AWS::Lambda::EventSourceMapping",
+            "Properties": {
+                "EventSourceArn": {
+                    "Fn::GetAtt": [
+                        "SQSQueue",
+                        "Arn"
+                    ]
+                },
+                "FunctionName": {
+                    "Fn::GetAtt": [
+                        "sqsReceiver",
+                        "Arn"
+                    ]
+                },
+                "BatchSize": "10",
+                "Enabled": "true"
+            }
+        },
+        "sqsPublisher": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": {
+                        "Fn::Sub": "itnachos-code-${AWS::Region}"
+                    },
+                    "S3Key": "api_gateway_to_queue_function.zip"
+                },
+                "Description": "Publishes messages to an SQS queue.",
+                "Tags": [
+                    {
+                        "Value": "SAM",
+                        "Key": "lambda:createdBy"
+                    }
+                ],
+                "MemorySize": 128,
+                "Environment": {
+                    "Variables": {
+                        "QUEUE_URL": {
+                            "Ref": "SQSQueue"
+                        },
+                        "MAX_QUE_TIME": 900
+                    }
+                },
+                "Handler": "index.handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "sqsPublisherRole",
+                        "Arn"
+                    ]
+                },
+                "Timeout": 10,
+                "Runtime": "nodejs12.x"
+            }
+        },
+        "sqsPublisherRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+                ],
+                "Policies": [
+                    {
+                        "PolicyName": "sqsPublisherRolePolicy0",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Action": [
+                                        "sqs:ChangeMessageVisibility",
+                                        "sqs:ChangeMessageVisibilityBatch",
+                                        "sqs:DeleteMessage",
+                                        "sqs:DeleteMessageBatch",
+                                        "sqs:GetQueueAttributes",
+                                        "sqs:SendMessage",
+                                        "sqs:SendMessageBatch",
+                                        "sqs:SetQueueAttributes"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": [
+                                            "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${queueName}",
+                                            {
+                                                "queueName": {
+                                                    "Ref": "QueueNameParameter"
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "Effect": "Allow"
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Action": [
+                                "sts:AssumeRole"
+                            ],
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "DependsOn": [
+                "SQSQueue"
+            ]
+        },
+        "ApiPublisher": {
+            "Type": "AWS::ApiGateway::RestApi",
+            "Properties": {
+                "Body": {
+                    "info": {
+                        "title": {
+                            "Ref": "AWS::StackName"
+                        }
+                    },
+                    "paths": {
+                        "/publish": {
+                            "post": {
+                                "x-amazon-apigateway-integration": {
+                                    "httpMethod": "POST",
+                                    "type": "aws_proxy",
+                                    "uri": {
+                                        "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${sqsPublisher.Arn}/invocations"
+                                    }
+                                },
+                                "responses": {}
+                            }
+                        }
+                    },
+                    "swagger": 2
+                }
+            },
+            "DependsOn": [
+                "SQSQueue"
+            ]
+        },
+        "ApiPublisherprodStage": {
+            "Type": "AWS::ApiGateway::Stage",
+            "Properties": {
+                "DeploymentId": {
+                    "Ref": "ApiPublisherDeployment"
+                },
+                "RestApiId": {
+                    "Ref": "ApiPublisher"
+                },
+                "StageName": "prod"
+            }
+        },
+        "ApiPublisherDeployment": {
+            "Type": "AWS::ApiGateway::Deployment",
+            "Properties": {
+                "RestApiId": {
+                    "Ref": "ApiPublisher"
+                },
+                "Description": "RestApi deployment.",
+                "StageName": "Stage"
+            }
+        },
+        "sqsPublisherPubApiPermissionprod": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:invokeFunction",
+                "Principal": "apigateway.amazonaws.com",
+                "FunctionName": {
+                    "Ref": "sqsPublisher"
+                },
+                "SourceArn": {
+                    "Fn::Sub": [
+                        "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${__ApiId__}/${__Stage__}/POST/publish",
+                        {
+                            "__Stage__": "prod",
+                            "__ApiId__": {
+                                "Ref": "ApiPublisher"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "sqsPublisherPubApiPermissionTest": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:invokeFunction",
+                "Principal": "apigateway.amazonaws.com",
+                "FunctionName": {
+                    "Ref": "sqsPublisher"
+                },
+                "SourceArn": {
+                    "Fn::Sub": [
+                        "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${__ApiId__}/${__Stage__}/POST/publish",
+                        {
+                            "__Stage__": "*",
+                            "__ApiId__": {
+                                "Ref": "ApiPublisher"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "SQSQueue": {
+            "Type": "AWS::SQS::Queue",
+            "Properties": {
+                "QueueName": {
+                    "Ref": "QueueNameParameter"
+                }
+            },
+            "Metadata": {
+                "AWS::CloudFormation::Designer": {
+                    "id": "9afcf332-e868-4394-9812-618515a1574b"
+                }
+            }
+        }
+    }
+}
